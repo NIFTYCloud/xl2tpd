@@ -22,6 +22,7 @@
 #include <time.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <ctype.h>
 
 #include "l2tp.h"
 
@@ -48,6 +49,7 @@ int init_config ()
     gconfig.packet_dump = 0;
     gconfig.debug_tunnel = 0;
     gconfig.debug_state = 0;
+    gconfig.router_id = 0;
     lnslist = NULL;
     laclist = NULL;
     deflac = (struct lac *) calloc (1, sizeof (struct lac));
@@ -122,6 +124,9 @@ struct lns *new_lns ()
     tmp->pass_peer = 0;
     tmp->pppoptfile[0] = 0;
     tmp->t = NULL;
+    tmp->version = VER_L2TPV2;
+    tmp->script[0] = 0;
+    tmp->ifname[0] = 0;
     return tmp;
 }
 
@@ -166,6 +171,9 @@ struct lac *new_lac ()
     tmp->pass_peer = 0;
     tmp->pppoptfile[0] = 0;
     tmp->defaultroute = 0;
+    tmp->version = VER_L2TPV2;
+    tmp->script[0] = 0;
+    tmp->ifname[0] = 0;
     return tmp;
 }
 
@@ -1247,6 +1255,105 @@ int set_rand_source (char *word, char *value, int context, void *item)
     }
 }
 
+int set_version (char *word, char *value, int context, void *item)
+{
+    int version;
+    version = atoi (value);
+    if ((version != VER_L2TPV2) && (version != VER_L2TPV3)) {
+        snprintf (filerr, sizeof (filerr), "version invalid\n");
+        return -1;
+    }
+    switch (context & ~CONTEXT_DEFAULT)
+    {
+    case CONTEXT_LAC:
+        ((struct lac *) item)->version = version;
+        break;
+    case CONTEXT_LNS:
+        ((struct lns *) item)->version = version;
+        break;
+    default:
+        snprintf (filerr, sizeof (filerr), "'%s' not valid in this context\n", word);
+        return -1;
+    }
+    return 0;
+}
+
+int set_router_id (char *word, char *value, int context, void *item)
+{
+    switch (context & ~CONTEXT_DEFAULT)
+    {
+    case CONTEXT_GLOBAL:
+        if (set_ip (word, value, &(((struct global *) item)->router_id)))
+            return -1;
+        break;
+    default:
+        snprintf (filerr, sizeof (filerr), "'%s' not valid in this context\n",
+                  word);
+        return -1;
+    }
+    return 0;
+}
+
+int set_script (char *word, char *value, int context, void *item)
+{
+    struct lac *l = (struct lac *) item;
+    struct lns *n = (struct lns *) item;
+    char *c;
+    for (c = value; *c != '\0'; c++)
+    {
+        if (isspace(*c)) {
+            snprintf (filerr, sizeof (filerr), "'%s' not valid\n", word);
+            return -1;
+        }
+    }
+    switch (context & ~CONTEXT_DEFAULT)
+    {
+    case CONTEXT_LNS:
+        if (set_string (word, value, n->script, sizeof (n->script)))
+            return -1;
+        break;
+    case CONTEXT_LAC:
+        if (set_string (word, value, l->script, sizeof (l->script)))
+            return -1;
+        break;
+    default:
+        snprintf (filerr, sizeof (filerr), "'%s' not valid in this context\n",
+                  word);
+        return -1;
+    }
+    return 0;
+}
+
+int set_ifname (char *word, char *value, int context, void *item)
+{
+    struct lac *l = (struct lac *) item;
+    struct lns *n = (struct lns *) item;
+    char *c;
+    for (c = value; *c != '\0'; c++)
+    {
+        if (isspace(*c)) {
+            snprintf (filerr, sizeof (filerr), "'%s' not valid\n", word);
+            return -1;
+        }
+    }
+    switch (context & ~CONTEXT_DEFAULT)
+    {
+    case CONTEXT_LNS:
+        if (set_string (word, value, n->ifname, sizeof (n->ifname)))
+            return -1;
+        break;
+    case CONTEXT_LAC:
+        if (set_string (word, value, l->ifname, sizeof (l->ifname)))
+            return -1;
+        break;
+    default:
+        snprintf (filerr, sizeof (filerr), "'%s' not valid in this context\n",
+                  word);
+        return -1;
+    }
+    return 0;
+}
+
 int parse_config (FILE * f)
 {
     /* Read in the configuration file handed to us */
@@ -1537,5 +1644,9 @@ struct keyword words[] = {
     {"tx bps", &set_speed},
     {"rx bps", &set_speed},
     {"bps", &set_speed},
+    {"version", &set_version},
+    {"router id", &set_router_id},
+    {"script", &set_script},
+    {"ifname", &set_ifname},
     {NULL, NULL}
 };

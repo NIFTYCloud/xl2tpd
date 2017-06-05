@@ -135,7 +135,38 @@ int init_network (void)
     return 0;
 }
 
-inline void extract (void *buf, int *tunnel, int *call)
+long long int get_remote_session_id (void *buf)
+{
+    struct controlv3_hdr *h = (struct controlv3_hdr *)buf;
+    struct avp_hdr *avp;
+    _u16 atype;
+    int len, alen;
+    _u32 *id;
+
+    if (!PTBIT (h->ver)) {
+        return 0;
+    }
+
+    len = h->length - 12;
+    buf += 12;
+    avp = (struct avp_hdr *)buf;
+    while (len > 0)
+    {
+        alen = ALENGTH (ntohs(avp->length));
+        atype = ntohs(avp->attr);
+        if (atype == 64)
+        {
+            id = (_u32 *)(buf + 6);
+            return htonl(*id);
+        }
+        len -= alen;
+        buf += alen;
+        avp = (struct avp_hdr *)buf;
+    }
+    return 0;
+}
+
+inline void extract (void *buf, long long int *tunnel, long long int *call)
 {
     /*
      * Extract the tunnel and call #'s, and fix the order of the 
@@ -143,15 +174,26 @@ inline void extract (void *buf, int *tunnel, int *call)
      */
 
     struct payload_hdr *p = (struct payload_hdr *) buf;
-    if (PLBIT (p->ver))
+    _u16 ver = CVER(p->ver);
+
+    if (ver == VER_L2TPV3)
     {
-        *tunnel = p->tid;
-        *call = p->cid;
+        struct payloadv3_hdr *p3 = (struct payloadv3_hdr *) buf;
+        *tunnel = p3->tid;
+        *call = get_remote_session_id(buf);
     }
     else
     {
-        *tunnel = p->length;
-        *call = p->tid;
+        if (PLBIT (p->ver))
+        {
+            *tunnel = p->tid;
+            *call = p->cid;
+        }
+        else
+        {
+            *tunnel = p->length;
+            *call = p->tid;
+        }
     }
 }
 
@@ -163,13 +205,16 @@ inline void fix_hdr (void *buf)
 
     struct payload_hdr *p = (struct payload_hdr *) buf;
     _u16 ver = ntohs (p->ver);
-    if (CTBIT (p->ver))
+
+    if (CVER (ver) == VER_L2TPV3)
     {
-        /*
-         * Control headers are always
-         * exactly 12 bytes big.
-         */
-        swaps (buf, 12);
+        //swaps (buf, 12);
+        struct controlv3_hdr *h = (struct controlv3_hdr *) buf;
+        h->ver = ntohs(h->ver);
+        h->length = ntohs(h->length);
+        h->tid = ntohl(h->tid);
+        h->Ns = ntohs(h->Ns);
+        h->Nr = ntohs(h->Nr);
     }
     else
     {
@@ -428,7 +473,7 @@ void network_thread ()
     struct sockaddr_in from;
     struct in_pktinfo to;
     unsigned int fromlen;
-    int tunnel, call;           /* Tunnel and call */
+    long long int tunnel, call;           /* Tunnel and call */
     int recvsize;               /* Length of data received */
     struct buffer *buf;         /* Payload buffer */
     struct call *c, *sc;        /* Call to send this off to */
@@ -585,7 +630,7 @@ void network_thread ()
 	    if (gconfig.debug_network)
 	    {
 		l2tp_log(LOG_DEBUG, "%s: recv packet from %s, size = %d, "
-			 "tunnel = %d, call = %d ref=%u refhim=%u\n",
+			 "tunnel = %lld, call = %lld ref=%u refhim=%u\n",
 			 __FUNCTION__, inet_ntoa (from.sin_addr),
 			 recvsize, tunnel, call, refme, refhim);
 	    }
@@ -621,7 +666,7 @@ void network_thread ()
 		}
 		else
 		    l2tp_log (LOG_DEBUG,
-			      "%s: unable to find call or tunnel to handle packet.  call = %d, tunnel = %d Dumping.\n",
+			      "%s: unable to find call or tunnel to handle packet.  call = %lld, tunnel = %lld Dumping.\n",
 			      __FUNCTION__, call, tunnel);
 		
 	    }
@@ -671,7 +716,7 @@ void network_thread ()
 #endif
 		    if ((sc->rws>0) && (sc->pSs > sc->pLr + sc->rws) && !sc->rbit) {
 #ifdef DEBUG_FLOW
-						log(LOG_DEBUG, "%s: throttling payload (call = %d, tunnel = %d, Lr = %d, Ss = %d, rws = %d)!\n",__FUNCTION__,
+						log(LOG_DEBUG, "%s: throttling payload (call = %lld, tunnel = %lld, Lr = %d, Ss = %d, rws = %d)!\n",__FUNCTION__,
 								 sc->cid, sc->container->tid, sc->pLr, sc->pSs, sc->rws); 
 #endif
 						sc->throttle = -1;

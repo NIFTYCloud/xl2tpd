@@ -298,3 +298,89 @@ int add_number_avp (struct buffer *buf, char *no)
     buf->len += 0x6 + strlen (no);
     return 0;
 }
+
+int add_router_id_avp (struct buffer *buf, _u32 router_id)
+{
+    _u32 *ptr = (_u32 *)(buf->start + buf->len + sizeof(struct avp_hdr));
+    add_header(buf, 0xA, 0x3C);
+    *ptr = router_id;
+    buf->len += 0xA;
+    return 0;
+}
+
+int add_assigned_control_connection_id_avp (struct buffer *buf, _u32 tid)
+{
+    _u32 *ptr = (_u32 *)(buf->start + buf->len + sizeof(struct avp_hdr));
+    add_header(buf, 0xA, 0x3D);
+    *ptr = htonl (tid);
+    buf->len += 0xA;
+    return 0;
+}
+
+int add_pseudowire_capability_list_avp (struct buffer *buf)
+{
+    /* (5) Ethernet */
+    /* (4) Ethernet VLAN */
+    _u16 *ptr = (_u16 *)(buf->start + buf->len + sizeof(struct avp_hdr));
+    add_header(buf, 0xA, 0x3E);
+    ptr[0] = htons(5);
+    ptr[1] = htons(4);
+    buf->len += 0xA;
+    return 0;
+}
+
+int add_local_session_id_avp (struct buffer *buf, _u32 ourtid)
+{
+    _u32 *ptr = (_u32 *)(buf->start + buf->len + sizeof(struct avp_hdr));
+    add_header(buf, 0xA, 0x3F);
+    *ptr = htonl (ourtid);
+    buf->len += 0xA;
+    return 0;
+}
+
+int add_remote_session_id_avp (struct buffer *buf, _u32 tid)
+{
+    _u32 *ptr = (_u32 *)(buf->start + buf->len + sizeof(struct avp_hdr));
+    add_header(buf, 0xA, 0x40);
+    *ptr = htonl (tid);
+    buf->len += 0xA;
+    return 0;
+}
+
+int add_circuit_status_avp (struct buffer *buf)
+{
+    _u16 *ptr = (_u16 *)(buf->start + buf->len + sizeof(struct avp_hdr));
+    add_header(buf, 0x8, 0x47);
+    *ptr = htons (0x3);
+    buf->len += 0x8;
+    return 0;
+}
+
+int add_pseudowire_type_avp (struct buffer *buf)
+{
+    _u16 *ptr = (_u16 *)(buf->start + buf->len + sizeof(struct avp_hdr));
+    add_header(buf, 0x8, 0x44);
+    *ptr = htons (0x5);
+    buf->len += 0x8;
+    return 0;
+}
+
+int add_remote_end_id_avp (struct buffer *buf, char *end_id)
+{
+    add_header(buf, (0x6 + strlen (end_id)), 0x42);
+    strncpy ((char *) (buf->start + buf->len + sizeof(struct avp_hdr)), end_id, strlen (end_id));
+    buf->len += 0x6 + strlen (end_id);
+    return 0;
+}
+
+int add_tie_breaker_avp (struct buffer *buf)
+{
+    _u64 *ptr = (_u64 *)(buf->start + buf->len + sizeof(struct avp_hdr));
+    unsigned char entropy_buf[8] = "\0";
+    add_header(buf, 0xE, 0x5);
+    get_entropy(entropy_buf, 8);
+    *ptr = (_u64)entropy_buf;
+    buf->len += 0xE;
+    return 0;
+}
+
