@@ -18,7 +18,7 @@
 #include <netinet/in.h>
 #include "l2tp.h"
 
-#define AVP_MAX 39
+#define AVP_MAX 75
 
 struct avp avps[] = {
 
@@ -27,7 +27,7 @@ struct avp avps[] = {
     {2, 1, &protocol_version_avp, "Protocol Version"},
     {3, 1, &framing_caps_avp, "Framing Capabilities"},
     {4, 1, &bearer_caps_avp, "Bearer Capabilities"},
-    {5, 0, NULL, "Tie Breaker"},
+    {5, 0, &tie_breaker_avp, "Tie Breaker"},
     {6, 0, &firmware_rev_avp, "Firmware Revision"},
     {7, 0, &hostname_avp, "Host Name"},
     {8, 1, &vendor_avp, "Vendor Name"},
@@ -61,7 +61,43 @@ struct avp avps[] = {
     {36, 1, &rand_vector_avp, "Random Vector"},
     {37, 1, NULL, "Private Group ID"},
     {38, 0, &rx_speed_avp, "Receive Connect Speed"},
-    {39, 1, &seq_reqd_avp, "Sequencing Required"}
+    {39, 1, &seq_reqd_avp, "Sequencing Required"},
+    {40, 0, NULL, ""},
+    {41, 0, NULL, ""},
+    {42, 0, NULL, ""},
+    {43, 0, NULL, ""},
+    {44, 0, NULL, ""},
+    {45, 0, NULL, ""},
+    {46, 0, NULL, ""},
+    {47, 0, NULL, ""},
+    {48, 0, NULL, ""},
+    {49, 0, NULL, ""},
+    {50, 0, NULL, ""},
+    {51, 0, NULL, ""},
+    {52, 0, NULL, ""},
+    {53, 0, NULL, ""},
+    {54, 0, NULL, ""},
+    {55, 0, NULL, ""},
+    {56, 0, NULL, ""},
+    {57, 0, NULL, ""},
+    {58, 0, &extended_vendor_id_avp, "Extended Vendor ID"},
+    {59, 1, &message_digest_avp, "Message Digest"},
+    {60, 1, &router_id_avp, "Router ID"},
+    {61, 1, &assigned_control_connection_id_avp, "Assigned Control Connection ID"},
+    {62, 1, &pseudowire_capabilities_list_avp, "Pseudowire Capabilities List"},
+    {63, 1, &local_session_id_avp, "Local Session ID"},
+    {64, 1, &remote_session_id_avp, "Remote Session ID"},
+    {65, 1, &assigned_cookie_avp, "Assigned Cookie"},
+    {66, 1, &remote_end_id_avp, "Remote End ID"},
+    {67, 0, NULL, "Application Code"},
+    {68, 1, &pseudowire_type_avp, "Pseudowire Type"},
+    {69, 1, &l2_specific_sublayer_avp, "L2-Specific Sublayer"},
+    {70, 1, &data_sequencing_avp, "Data Sequencing"},
+    {71, 1, &circuit_status_avp, "Data Sequencing"},
+    {72, 0, &preferred_language_avp, "Preferred Language"},
+    {73, 1, &control_message_authentication_nonce_avp, "Control Message Authentication Nonce"},
+    {74, 0, &tx_connect_speed_avp, "Tx Connect Speed"},
+    {75, 0, &rx_connect_speed_avp, "Rx Connect Speed"}
 };
 
 char *msgtypes[] = {
@@ -81,7 +117,11 @@ char *msgtypes[] = {
     NULL,
     "Call-Disconnect-Notify",
     "WAN-Error-Notify",
-    "Set-Link-Info"
+    "Set-Link-Info",
+    NULL,
+    NULL,
+    NULL,
+    "Explicit-Acknowledgement"
 };
 
 char *stopccn_result_codes[] = {
@@ -106,7 +146,13 @@ char *cdn_result_codes[] = {
     "Call failed due to no carrier detected",
     "Call failed due to lack of a dial tone",
     "Call was no established within time allotted by LAC",
-    "Call was connected but no appropriate framing was detect"
+    "Call was connected but no appropriate framing was detect",
+    "Reserved",
+    "Reserved",
+    "Session not established due to losing tie breaker",
+    "Session not established due to unsupported PW type",
+    "Session not established, sequencing required without valid L2-Specific Sublayer",
+    "Finite state machine error or timeout"
 };
 
 void wrong_length (struct call *c, char *field, int expected, int found,
@@ -445,13 +491,14 @@ int result_code_avp (struct tunnel *t, struct call *c, void *data,
 #ifdef SANITY
     if (t->sanity)
     {
-        if (datalen < 10)
+	/* XXX: Result-Error Code AVP's min size is 8 not 10 */
+        if (datalen < 8)
         {
             if (DEBUG)
                 l2tp_log (LOG_DEBUG,
-                     "%s: avp is incorrect size.  %d < 10\n", __FUNCTION__,
+                     "%s: avp is incorrect size.  %d < 8\n", __FUNCTION__,
                      datalen);
-            wrong_length (c, "Result Code", 10, datalen, 1);
+            wrong_length (c, "Result Code", 8, datalen, 1);
             return -EINVAL;
         }
         switch (c->msgtype)
@@ -513,7 +560,7 @@ int result_code_avp (struct tunnel *t, struct call *c, void *data,
 
     c->error = error;
     c->result = result;
-    safe_copy (c->errormsg, (char *) &raw[5].s, datalen - 10);
+    safe_copy (c->errormsg, (char *) &raw[5].s, datalen - 8);
     if (gconfig.debug_avp)
     {
         if (DEBUG && (c->msgtype == StopCCN))
@@ -683,6 +730,11 @@ int bearer_caps_avp (struct tunnel *t, struct call *c, void *data,
 
 
 /* FIXME: I need to handle tie breakers eventually */
+int tie_breaker_avp (struct tunnel *t, struct call *c, void *data,
+                      int datalen)
+{
+    return 0;
+}
 
 int firmware_rev_avp (struct tunnel *t, struct call *c, void *data,
                       int datalen)
@@ -1796,3 +1848,175 @@ int handle_avps (struct buffer *buf, struct tunnel *t, struct call *c)
     }
     return 0;
 }
+
+/* FIXME: */
+int extended_vendor_id_avp (struct tunnel *t, struct call *c, void *data, int datalen)
+{
+    return 0;
+}
+
+/* FIXME: */
+int message_digest_avp (struct tunnel *t, struct call *c, void *data, int datalen)
+{
+    return 0;
+}
+
+int router_id_avp (struct tunnel *t, struct call *c, void *data, int datalen)
+{
+    t->router_id = ntohl(*((_u32 *)(data + 6)));
+    if (gconfig.debug_avp)
+    {
+        if (DEBUG)
+            l2tp_log (LOG_DEBUG,
+                 "%s: router id is %d\n", __FUNCTION__,
+                 t->router_id);
+    }
+    return 0;
+}
+
+int assigned_control_connection_id_avp (struct tunnel *t, struct call *c, void *data, int datalen)
+{
+    _u32 tid = ntohl(*((_u32 *)(data + 6)));
+    if (c->msgtype == StopCCN)
+    {
+        t->qtid = tid;
+    }
+    else
+    {
+        t->tid = tid;
+    }
+    if (gconfig.debug_avp)
+    {
+        if (DEBUG)
+            l2tp_log (LOG_DEBUG,
+                 "%s: assigned control connection id is %d\n", __FUNCTION__,
+                 tid);
+    }
+    return 0;
+}
+
+/* FIXME: */
+int pseudowire_capabilities_list_avp (struct tunnel *t, struct call *c, void *data, int datalen)
+{
+    return 0;
+}
+
+int local_session_id_avp (struct tunnel *t, struct call *c, void *data, int datalen)
+{
+    _u32 cid = ntohl(*((_u32 *)(data + 6)));
+    if (c->msgtype == CDN)
+    {
+        c->qcid = cid;
+    }
+    else if (c->msgtype == ICRQ)
+    {
+        t->call_head->cid = cid;
+    }
+    else if (c->msgtype == ICRP)
+    {
+        c->cid = cid;
+    }
+    else if (c->msgtype == OCRP)
+    {
+        c->cid = cid;
+    }
+    else
+    {
+        l2tp_log (LOG_DEBUG, "%s:  Dunno what to do when it's state %s!\n",
+            __FUNCTION__, msgtypes[c->msgtype]);
+    }
+    if (gconfig.debug_avp)
+    {
+        if (DEBUG)
+            l2tp_log (LOG_DEBUG,
+                 "%s: local session id is %d\n", __FUNCTION__,
+                 cid);
+    }
+    return 0;
+}
+
+/* FIXME: */
+int remote_session_id_avp (struct tunnel *t, struct call *c, void *data, int datalen)
+{
+    return 0;
+}
+
+/* FIXME: */
+int assigned_cookie_avp (struct tunnel *t, struct call *c, void *data, int datalen)
+{
+    return 0;
+}
+
+int remote_end_id_avp (struct tunnel *t, struct call *c, void *data, int datalen)
+{
+    int size;
+    struct unaligned_u16 *raw = data;
+
+    size = raw[0].s & 0x03ff;
+    size -= sizeof (struct avp_hdr);
+    if (size > MAXSTRLEN - 1)
+    {
+        if (DEBUG)
+            l2tp_log (LOG_DEBUG, "%s: truncating reported remote end id (size is %d)\n",
+                __FUNCTION__, size);
+        size = MAXSTRLEN - 1;
+    }
+    safe_copy (t->remote_end_id, (char *) &raw[3].s, size);
+    if (gconfig.debug_avp)
+    {
+        if (DEBUG)
+            l2tp_log (LOG_DEBUG,
+                 "%s: peer reports remote end id '%s'\n", __FUNCTION__,
+                 t->remote_end_id);
+    }
+    return 0;
+}
+
+/* FIXME: */
+int pseudowire_type_avp (struct tunnel *t, struct call *c, void *data, int datalen)
+{
+    return 0;
+}
+
+/* FIXME: */
+int l2_specific_sublayer_avp (struct tunnel *t, struct call *c, void *data, int datalen)
+{
+    return 0;
+}
+
+/* FIXME: */
+int data_sequencing_avp (struct tunnel *t, struct call *c, void *data, int datalen)
+{
+    return 0;
+}
+
+/* FIXME: */
+int circuit_status_avp (struct tunnel *t, struct call *c, void *data, int datalen)
+{
+    return 0;
+}
+
+/* FIXME: */
+int preferred_language_avp (struct tunnel *t, struct call *c, void *data, int datalen)
+{
+    return 0;
+}
+
+/* FIXME: */
+int control_message_authentication_nonce_avp (struct tunnel *t, struct call *c, void *data, int datalen)
+{
+    return 0;
+}
+
+/* FIXME: */
+int tx_connect_speed_avp (struct tunnel *t, struct call *c, void *data, int datalen)
+{
+    return 0;
+}
+
+/* FIXME: */
+int rx_connect_speed_avp (struct tunnel *t, struct call *c, void *data, int datalen)
+{
+    return 0;
+}
+

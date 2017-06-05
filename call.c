@@ -68,7 +68,7 @@ void add_payload_hdr (struct tunnel *t, struct call *c, struct buffer *buf)
     }
     p = (struct payload_hdr *) buf->start;
 /*	p->ver = htons(c->lbit | c->rbit | c->fbit | c->ourfbit | VER_L2TP); */
-    p->ver = htons (c->lbit | c->fbit | c->ourfbit | VER_L2TP);
+    p->ver = htons (c->lbit | c->fbit | c->ourfbit | VER_L2TPV2);
     if (c->lbit)
     {
         p->length = htons ((_u16) buf->len);
@@ -301,19 +301,26 @@ void call_close (struct call *c)
         c->closeSs = c->container->control_seq_num;
         buf = new_outgoing (c->container);
         add_message_type_avp (buf, StopCCN);
-        if (c->container->hbit)
+        if (c->container->version == VER_L2TPV2)
         {
-            mk_challenge (c->container->chal_them.vector, VECTOR_SIZE);
-            add_randvect_avp (buf, c->container->chal_them.vector,
-                              VECTOR_SIZE);
+            if (c->container->hbit)
+            {
+                mk_challenge (c->container->chal_them.vector, VECTOR_SIZE);
+                add_randvect_avp (buf, c->container->chal_them.vector,
+                                  VECTOR_SIZE);
+            }
+            add_tunnelid_avp (buf, c->container->ourtid);
         }
-        add_tunnelid_avp (buf, c->container->ourtid);
         if (c->result < 0)
             c->result = RESULT_CLEAR;
         if (c->error < 0)
             c->error = 0;
         add_result_code_avp (buf, c->result, c->error, c->errormsg,
                              strlen (c->errormsg));
+        if (c->container->version == VER_L2TPV3)
+        {
+            add_assigned_control_connection_id_avp (buf, c->container->ourtid);
+        }
         add_control_hdr (c->container, c, buf);
         if (gconfig.packet_dump)
             do_packet_dump (buf);
@@ -495,6 +502,13 @@ void destroy_call (struct call *c)
         }
     }
 
+    if ((c->container->version == VER_L2TPV3) &&
+        (c != c->container->self))
+    {
+        l2tp_log (LOG_DEBUG, "%s: calling l2tpv3_delete_session", __FUNCTION__);
+        l2tpv3_delete_session (c);
+    }
+
     free (c);
 }
 
@@ -582,7 +596,7 @@ struct call *new_call (struct tunnel *parent)
     return tmp;
 }
 
-struct call *get_tunnel (int tunnel, unsigned int addr, int port)
+struct call *get_tunnel (long long int tunnel, unsigned int addr, int port)
 {
     struct tunnel *st;
     if (tunnel)
@@ -600,7 +614,7 @@ struct call *get_tunnel (int tunnel, unsigned int addr, int port)
     return NULL;
 }
 
-struct call *get_call (int tunnel, int call,  struct in_addr addr, int port,
+struct call *get_call (long long int tunnel, long long int call,  struct in_addr addr, int port,
 		       IPsecSAref_t refme, IPsecSAref_t refhim)
 {
     /*

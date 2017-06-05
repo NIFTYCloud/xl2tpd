@@ -1,6 +1,6 @@
-xl2tpd (XL2TPDBASEVERSION-1xelerance1) lucid; urgency=low
+xl2tpd (999.dev) unstable; urgency=low
 
-  * Update to XL2TPDBASEVERSION
+  * Update to 999.dev
 
   The real changelog is in /usr/share/doc/xl2tpd/changelog.gz
 

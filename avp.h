@@ -90,6 +90,7 @@ extern int message_type_avp (struct tunnel *, struct call *, void *, int);
 extern int protocol_version_avp (struct tunnel *, struct call *, void *, int);
 extern int framing_caps_avp (struct tunnel *, struct call *, void *, int);
 extern int bearer_caps_avp (struct tunnel *, struct call *, void *, int);
+extern int tie_breaker_avp (struct tunnel *, struct call *, void *, int);
 extern int firmware_rev_avp (struct tunnel *, struct call *, void *, int);
 extern int hostname_avp (struct tunnel *, struct call *, void *, int);
 extern int vendor_avp (struct tunnel *, struct call *, void *, int);
@@ -113,6 +114,24 @@ extern int seq_reqd_avp (struct tunnel *, struct call *, void *, int);
 extern int challenge_avp (struct tunnel *, struct call *, void *, int);
 extern int chalresp_avp (struct tunnel *, struct call *, void *, int);
 extern int rand_vector_avp (struct tunnel *, struct call *, void *, int);
+
+extern int extended_vendor_id_avp (struct tunnel *, struct call *, void *, int);
+extern int message_digest_avp (struct tunnel *, struct call *, void *, int);
+extern int router_id_avp (struct tunnel *, struct call *, void *, int);
+extern int assigned_control_connection_id_avp (struct tunnel *, struct call *, void *, int);
+extern int pseudowire_capabilities_list_avp (struct tunnel *, struct call *, void *, int);
+extern int local_session_id_avp (struct tunnel *, struct call *, void *, int);
+extern int remote_session_id_avp (struct tunnel *, struct call *, void *, int);
+extern int assigned_cookie_avp (struct tunnel *, struct call *, void *, int);
+extern int remote_end_id_avp (struct tunnel *, struct call *, void *, int);
+extern int pseudowire_type_avp (struct tunnel *, struct call *, void *, int);
+extern int l2_specific_sublayer_avp (struct tunnel *, struct call *, void *, int);
+extern int data_sequencing_avp (struct tunnel *, struct call *, void *, int);
+extern int circuit_status_avp (struct tunnel *, struct call *, void *, int);
+extern int preferred_language_avp (struct tunnel *, struct call *, void *, int);
+extern int control_message_authentication_nonce_avp (struct tunnel *, struct call *, void *, int);
+extern int tx_connect_speed_avp (struct tunnel *, struct call *, void *, int);
+extern int rx_connect_speed_avp (struct tunnel *, struct call *, void *, int);
 
 extern int add_challenge_avp (struct buffer *, unsigned char *, int);
 extern int add_avp_rws (struct buffer *, _u16);
@@ -142,3 +161,14 @@ extern int add_randvect_avp (struct buffer *, unsigned char *, int);
 extern int add_minbps_avp (struct buffer *buf, int speed);      /* jz: needed for outgoing call */
 extern int add_maxbps_avp (struct buffer *buf, int speed);      /* jz: needed for outgoing call */
 extern int add_number_avp (struct buffer *buf, char *no);       /* jz: needed for outgoing call */
+
+extern int add_router_id_avp (struct buffer *buf, _u32 router_id);
+extern int add_assigned_control_connection_id_avp (struct buffer *buf, _u32 tid);
+extern int add_pseudowire_capability_list_avp (struct buffer *buf);
+extern int add_local_session_id_avp (struct buffer *buf, _u32 ourtid);
+extern int add_remote_session_id_avp (struct buffer *buf, _u32 tid);
+extern int add_circuit_status_avp (struct buffer *buf);
+extern int add_pseudowire_type_avp (struct buffer *buf);
+extern int add_remote_end_id_avp (struct buffer *buf, char *end_id);
+extern int add_tie_breaker_avp (struct buffer *buf);
+
