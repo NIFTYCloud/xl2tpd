@@ -68,19 +68,33 @@ struct buffer *new_outgoing (struct tunnel *t)
     if (!tmp)
         return NULL;
     tmp->peer = t->peer;
-    tmp->start += sizeof (struct control_hdr);
+    if (t->version == VER_L2TPV3)
+    {
+        tmp->start += sizeof (struct controlv3_hdr);
+    }
+    else
+    {
+        tmp->start += sizeof (struct control_hdr);
+    }
     tmp->len = 0;
     tmp->retries = 0;
     tmp->tunnel = t;
     return tmp;
 }
 
-inline void recycle_outgoing (struct buffer *buf, struct sockaddr_in peer)
+inline void recycle_outgoing (struct tunnel *t, struct buffer *buf, struct sockaddr_in peer)
 {
     /* 
      * This should only be used for ZLB's!
      */
-    buf->start = buf->rstart + sizeof (struct control_hdr);
+    if (t->version == VER_L2TPV3)
+    {
+        buf->start = buf->rstart + sizeof (struct controlv3_hdr);
+    }
+    else
+    {
+        buf->start = buf->rstart + sizeof (struct control_hdr);
+    }
     buf->peer = peer;
     buf->len = 0;
     buf->retries = -1;
@@ -106,17 +120,31 @@ void add_fcs (struct buffer *buf)
 void add_control_hdr (struct tunnel *t, struct call *c, struct buffer *buf)
 {
     struct control_hdr *h;
-    buf->start -= sizeof (struct control_hdr);
-    buf->len += sizeof (struct control_hdr);
-    h = (struct control_hdr *) buf->start;
-    h->ver = htons (TBIT | LBIT | FBIT | VER_L2TP);
-    h->length = htons ((_u16) buf->len);
-    h->tid = htons (t->tid);
-    h->cid = htons (c->cid);
-    h->Ns = htons (t->control_seq_num);
-    h->Nr = htons (t->control_rec_seq_num);
+    struct controlv3_hdr *h3;
+    if (t->version == VER_L2TPV3)
+    {
+        buf->start -= sizeof (struct controlv3_hdr);
+        buf->len += sizeof (struct controlv3_hdr);
+        h3 = (struct controlv3_hdr *) buf->start;
+        h3->ver = htons (TBIT | LBIT | FBIT | VER_L2TPV3);
+        h3->length = htons ((_u16) buf->len);
+        h3->tid = htonl ((_u32) t->tid);
+        h3->Ns = htons (t->control_seq_num);
+        h3->Nr = htons (t->control_rec_seq_num);
+    }
+    else
+    {
+        buf->start -= sizeof (struct control_hdr);
+        buf->len += sizeof (struct control_hdr);
+        h = (struct control_hdr *) buf->start;
+        h->ver = htons (TBIT | LBIT | FBIT | VER_L2TPV2);
+        h->length = htons ((_u16) buf->len);
+        h->tid = htons ((_u16) t->tid);
+        h->cid = htons ((_u16) c->cid);
+        h->Ns = htons (t->control_seq_num);
+        h->Nr = htons (t->control_rec_seq_num);
+    }
     t->control_seq_num++;
-
 }
 
 void hello (void *tun)
@@ -148,7 +176,7 @@ void hello (void *tun)
 
 void control_zlb (struct buffer *buf, struct tunnel *t, struct call *c)
 {
-    recycle_outgoing (buf, t->peer);
+    recycle_outgoing (t, buf, t->peer);
     add_control_hdr (t, c, buf);
     t->control_seq_num--;
 #ifdef DEBUG_ZLB
@@ -206,6 +234,7 @@ int control_finish (struct tunnel *t, struct call *c)
                 t->hbit = t->lns->hbit;
 		t->rxspeed = t->lns->rxspeed;
 		t->txspeed = t->lns->txspeed;
+                t->version = t->lns->version;
             }
             else if (t->lac)
             {
@@ -213,21 +242,25 @@ int control_finish (struct tunnel *t, struct call *c)
                 t->hbit = t->lac->hbit;
 		t->rxspeed = t->lac->rxspeed;
 		t->txspeed = t->lac->txspeed;
+                t->version = t->lac->version;
             }
             /* This is an attempt to bring up the tunnel */
             t->state = SCCRQ;
             buf = new_outgoing (t);
             add_message_type_avp (buf, SCCRQ);
-            if (t->hbit)
+            if (t->version == VER_L2TPV2)
             {
-                mk_challenge (t->chal_them.vector, VECTOR_SIZE);
-                add_randvect_avp (buf, t->chal_them.vector, VECTOR_SIZE);
+                if (t->hbit)
+                {
+                    mk_challenge (t->chal_them.vector, VECTOR_SIZE);
+                    add_randvect_avp (buf, t->chal_them.vector, VECTOR_SIZE);
+                }
+                add_protocol_avp (buf);
+                add_frame_caps_avp (buf, t->ourfc);
+                add_bearer_caps_avp (buf, t->ourbc);
+                /* FIXME:  Tie breaker */
+                add_firmware_avp (buf);
             }
-            add_protocol_avp (buf);
-            add_frame_caps_avp (buf, t->ourfc);
-            add_bearer_caps_avp (buf, t->ourbc);
-            /* FIXME:  Tie breaker */
-            add_firmware_avp (buf);
             if (t->lac && t->lac->hostname && t->lac->hostname[0])
                 add_hostname_avp (buf, t->lac->hostname);
             else if (t->lns && t->lns->hostname && t->lns->hostname[0])
@@ -235,30 +268,42 @@ int control_finish (struct tunnel *t, struct call *c)
             else
                 add_hostname_avp (buf, hostname);
             add_vendor_avp (buf);
-            add_tunnelid_avp (buf, t->ourtid);
-            if (t->ourrws >= 0)
-                add_avp_rws (buf, t->ourrws);
-            if ((t->lac && t->lac->challenge)
-                || (t->lns && t->lns->challenge))
+            if (t->version == VER_L2TPV2) 
             {
-		if (t->chal_them.challenge)
-		    free(t->chal_them.challenge);
-                t->chal_them.challenge = malloc(MD_SIG_SIZE);
-                if (!(t->chal_them.challenge))
+                add_tunnelid_avp (buf, t->ourtid);
+            }
+            if ((t->ourrws >= 0) && (t->ourrws != DEFAULT_RWS_SIZE))
+                add_avp_rws (buf, t->ourrws);
+            if (t->version == VER_L2TPV2)
+            {
+                if ((t->lac && t->lac->challenge)
+                    || (t->lns && t->lns->challenge))
                 {
-                    l2tp_log (LOG_WARNING, "%s: malloc failed for challenge\n",
-			 __FUNCTION__);
-		    toss (buf);
-                    return -EINVAL;
-                }
-                mk_challenge (t->chal_them.challenge, MD_SIG_SIZE);
-                t->chal_them.chal_len = MD_SIG_SIZE;
-                add_challenge_avp (buf, t->chal_them.challenge,
+                    if (t->chal_them.challenge)
+                        free(t->chal_them.challenge);
+                    t->chal_them.challenge = malloc(MD_SIG_SIZE);
+                    if (!(t->chal_them.challenge))
+                    {
+                        l2tp_log (LOG_WARNING, "%s: malloc failed for challenge\n",
+    			 __FUNCTION__);
+                        toss (buf);
+                        return -EINVAL;
+                    }
+                    mk_challenge (t->chal_them.challenge, MD_SIG_SIZE);
+                    t->chal_them.chal_len = MD_SIG_SIZE;
+                    add_challenge_avp (buf, t->chal_them.challenge,
 				   t->chal_them.chal_len);
-                t->chal_them.state = STATE_CHALLENGED;
-                /* We generate the challenge and make a note that we plan to
-                   challenge the peer, but we can't predict the response yet
-                   because we don't know their hostname AVP */
+                    t->chal_them.state = STATE_CHALLENGED;
+                    /* We generate the challenge and make a note that we plan to
+                       challenge the peer, but we can't predict the response yet
+                       because we don't know their hostname AVP */
+                }
+            }
+            if (t->version == VER_L2TPV3)
+            {
+                add_router_id_avp (buf, gconfig.router_id);
+                add_assigned_control_connection_id_avp (buf, t->ourtid);
+                add_pseudowire_capability_list_avp (buf);
             }
             add_control_hdr (t, c, buf);
             c->cnu = 0;
@@ -271,7 +316,7 @@ int control_finish (struct tunnel *t, struct call *c)
         }
         else
         {
-            if (switch_io)
+            if (switch_io || (t->version == VER_L2TPV3))
             {
                 c->state = ICRQ;
                 if (c->lns)
@@ -288,20 +333,38 @@ int control_finish (struct tunnel *t, struct call *c)
                 }
                 buf = new_outgoing (t);
                 add_message_type_avp (buf, ICRQ);
-                if (t->hbit)
+                if (t->version == VER_L2TPV2)
                 {
-                    mk_challenge (t->chal_them.vector, VECTOR_SIZE);
-                    add_randvect_avp (buf, t->chal_them.vector, VECTOR_SIZE);
-                }
+                    if (t->hbit)
+                    {
+                        mk_challenge (t->chal_them.vector, VECTOR_SIZE);
+                        add_randvect_avp (buf, t->chal_them.vector, VECTOR_SIZE);
+                    }
 #ifdef TEST_HIDDEN
-                add_callid_avp (buf, c->ourcid, t);
+                    add_callid_avp (buf, c->ourcid, t);
 #else
-                add_callid_avp (buf, c->ourcid);
+                    add_callid_avp (buf, c->ourcid);
 #endif
+                }
+                if (t->version == VER_L2TPV3)
+                {
+                    add_local_session_id_avp (buf, c->ourcid);
+                    add_remote_session_id_avp (buf, c->cid);
+                }
                 add_serno_avp (buf, global_serno);
                 c->serno = global_serno;
                 global_serno++;
-                add_bearer_avp (buf, 0);
+                if (t->version == VER_L2TPV2)
+                {
+                    add_bearer_avp (buf, 0);
+                }
+                if (t->version == VER_L2TPV3)
+                {
+                    add_pseudowire_type_avp (buf);
+                    add_remote_end_id_avp (buf, c->lac->authname);
+                    add_tie_breaker_avp (buf);
+                    add_circuit_status_avp (buf);
+                }
                 add_control_hdr (t, c, buf);
                 c->cnu = 0;
                 if (gconfig.packet_dump)
@@ -377,30 +440,34 @@ int control_finish (struct tunnel *t, struct call *c)
             c->needclose = -1;
             return -EINVAL;
         }
+        t->version = t->lns->version;
         t->ourrws = t->lns->tun_rws;
         t->hbit = t->lns->hbit;
-        if (t->fc < 0)
+        if (t->version == VER_L2TPV2)
         {
-            if (DEBUG)
-                l2tp_log (LOG_DEBUG,
-                     "%s: Peer did not specify framing capability.  Closing.\n",
-                     __FUNCTION__);
-            set_error (c, VENDOR_ERROR, "Specify framing capability");
-            c->needclose = -1;
-            return -EINVAL;
+            if (t->fc < 0)
+            {
+                if (DEBUG)
+                    l2tp_log (LOG_DEBUG,
+                         "%s: Peer did not specify framing capability.  Closing.\n",
+                         __FUNCTION__);
+                set_error (c, VENDOR_ERROR, "Specify framing capability");
+                c->needclose = -1;
+                return -EINVAL;
+            }
+            /* FIXME: Do we need to be sure they specified a version number?
+             *   Theoretically, yes, but we don't have anything in the code
+             *   to actually *do* anything with it, so...why check at this point?
+             * We shouldn't be requiring a bearer capabilities avp to be present in 
+             * SCCRQ and SCCRP as they aren't required
+             if (t->bc < 0 ) {
+             if (DEBUG) l2tp_log(LOG_DEBUG,
+             "%s: Peer did not specify bearer capability.  Closing.\n",__FUNCTION__);
+             set_error(c, VENDOR_ERROR, "Specify bearer capability");
+             c->needclose = -1;
+             return -EINVAL;
+             }  */
         }
-        /* FIXME: Do we need to be sure they specified a version number?
-         *   Theoretically, yes, but we don't have anything in the code
-         *   to actually *do* anything with it, so...why check at this point?
-         * We shouldn't be requiring a bearer capabilities avp to be present in 
-         * SCCRQ and SCCRP as they aren't required
-         if (t->bc < 0 ) {
-         if (DEBUG) l2tp_log(LOG_DEBUG,
-         "%s: Peer did not specify bearer capability.  Closing.\n",__FUNCTION__);
-         set_error(c, VENDOR_ERROR, "Specify bearer capability");
-         c->needclose = -1;
-         return -EINVAL;
-         }  */
         if ((!strlen (t->hostname)) && ((t->chal_us.state) || ((t->lns->challenge))))
         {
             if (DEBUG)
@@ -437,15 +504,18 @@ int control_finish (struct tunnel *t, struct call *c)
         t->state = SCCRP;
         buf = new_outgoing (t);
         add_message_type_avp (buf, SCCRP);
-        if (t->hbit)
+        if (t->version == VER_L2TPV2)
         {
-            mk_challenge (t->chal_them.vector, VECTOR_SIZE);
-            add_randvect_avp (buf, t->chal_them.vector, VECTOR_SIZE);
+            if (t->hbit)
+            {
+                mk_challenge (t->chal_them.vector, VECTOR_SIZE);
+                add_randvect_avp (buf, t->chal_them.vector, VECTOR_SIZE);
+            }
+            add_protocol_avp (buf);
+            add_frame_caps_avp (buf, t->ourfc);
+            add_bearer_caps_avp (buf, t->ourbc);
+            add_firmware_avp (buf);
         }
-        add_protocol_avp (buf);
-        add_frame_caps_avp (buf, t->ourfc);
-        add_bearer_caps_avp (buf, t->ourbc);
-        add_firmware_avp (buf);
         if (t->lac && t->lac->hostname && t->lac->hostname[0])
             add_hostname_avp (buf, t->lac->hostname);
         else if (t->lns && t->lns->hostname && t->lns->hostname[0])
@@ -453,41 +523,53 @@ int control_finish (struct tunnel *t, struct call *c)
         else
             add_hostname_avp (buf, hostname);
         add_vendor_avp (buf);
-        add_tunnelid_avp (buf, t->ourtid);
-        if (t->ourrws >= 0)
-            add_avp_rws (buf, t->ourrws);
-        if (t->chal_us.state)
+        if (t->version == VER_L2TPV2)
         {
-            t->chal_us.ss = SCCRP;
-            handle_challenge (t, &t->chal_us);
-            add_chalresp_avp (buf, t->chal_us.response, MD_SIG_SIZE);
+            add_tunnelid_avp (buf, t->ourtid);
         }
-        if (t->lns->challenge)
+        if ((t->ourrws >= 0) && (t->ourrws != DEFAULT_RWS_SIZE))
+            add_avp_rws (buf, t->ourrws);
+        if (t->version == VER_L2TPV2)
         {
-            if (t->chal_them.challenge)
-		free(t->chal_them.challenge);
-            t->chal_them.challenge = malloc(MD_SIG_SIZE);
-            if (!(t->chal_them.challenge))
+            if (t->chal_us.state)
             {
-                l2tp_log (LOG_WARNING, "%s: malloc failed\n", __FUNCTION__);
-                set_error (c, VENDOR_ERROR, "malloc failed");
-                toss (buf);
-                return -EINVAL;
+                t->chal_us.ss = SCCRP;
+                handle_challenge (t, &t->chal_us);
+                add_chalresp_avp (buf, t->chal_us.response, MD_SIG_SIZE);
             }
-            mk_challenge (t->chal_them.challenge, MD_SIG_SIZE);
-            t->chal_them.chal_len = MD_SIG_SIZE;
-            t->chal_them.ss = SCCCN;
-            if (handle_challenge (t, &t->chal_them))
+            if (t->lns->challenge)
             {
-                /* We already know what to expect back */
-                l2tp_log (LOG_WARNING, "%s: No secret for '%s'\n", __FUNCTION__,
-                     t->hostname);
-                set_error (c, VENDOR_ERROR, "No secret on our side");
-                toss (buf);
-                return -EINVAL;
-            };
-            add_challenge_avp (buf, t->chal_them.challenge,
-			       t->chal_them.chal_len);
+                if (t->chal_them.challenge)
+                    free(t->chal_them.challenge);
+                t->chal_them.challenge = malloc(MD_SIG_SIZE);
+                if (!(t->chal_them.challenge))
+                {
+                    l2tp_log (LOG_WARNING, "%s: malloc failed\n", __FUNCTION__);
+                    set_error (c, VENDOR_ERROR, "malloc failed");
+                    toss (buf);
+                    return -EINVAL;
+                }
+                mk_challenge (t->chal_them.challenge, MD_SIG_SIZE);
+                t->chal_them.chal_len = MD_SIG_SIZE;
+                t->chal_them.ss = SCCCN;
+                if (handle_challenge (t, &t->chal_them))
+                {
+                    /* We already know what to expect back */
+                    l2tp_log (LOG_WARNING, "%s: No secret for '%s'\n", __FUNCTION__,
+                         t->hostname);
+                    set_error (c, VENDOR_ERROR, "No secret on our side");
+                    toss (buf);
+                    return -EINVAL;
+                };
+                add_challenge_avp (buf, t->chal_them.challenge,
+                    t->chal_them.chal_len);
+            }
+        }
+        if (t->version == VER_L2TPV3)
+        {
+            add_router_id_avp (buf, gconfig.router_id);
+            add_assigned_control_connection_id_avp (buf, t->ourtid);
+            add_pseudowire_capability_list_avp (buf);
         }
         add_control_hdr (t, c, buf);
         if (gconfig.packet_dump)
@@ -503,28 +585,31 @@ int control_finish (struct tunnel *t, struct call *c)
          * We have a reply.  If everything is okay, send
          * a connected message
          */
-        if (t->fc < 0)
+        if (t->version == VER_L2TPV2)
         {
-            if (DEBUG)
-                l2tp_log (LOG_DEBUG,
-                     "%s: Peer did not specify framing capability.  Closing.\n",
-                     __FUNCTION__);
-            set_error (c, VENDOR_ERROR, "Specify framing capability");
-            c->needclose = -1;
-            return -EINVAL;
+            if (t->fc < 0)
+            {
+                if (DEBUG)
+                    l2tp_log (LOG_DEBUG,
+                         "%s: Peer did not specify framing capability.  Closing.\n",
+                         __FUNCTION__);
+                set_error (c, VENDOR_ERROR, "Specify framing capability");
+                c->needclose = -1;
+                return -EINVAL;
+            }
+            /* FIXME: Do we need to be sure they specified a version number?
+             *   Theoretically, yes, but we don't have anything in the code
+             *   to actually *do* anything with it, so...why check at this point?
+             * We shouldn't be requiring a bearer capabilities avp to be present in 
+             * SCCRQ and SCCRP as they aren't required
+             if (t->bc < 0 ) {
+             if (DEBUG) log(LOG_DEBUG,
+             "%s: Peer did not specify bearer capability.  Closing.\n",__FUNCTION__);
+             set_error(c, VENDOR_ERROR, "Specify bearer capability");
+             c->needclose = -1;
+             return -EINVAL;
+             } */
         }
-        /* FIXME: Do we need to be sure they specified a version number?
-         *   Theoretically, yes, but we don't have anything in the code
-         *   to actually *do* anything with it, so...why check at this point?
-         * We shouldn't be requiring a bearer capabilities avp to be present in 
-         * SCCRQ and SCCRP as they aren't required
-         if (t->bc < 0 ) {
-         if (DEBUG) log(LOG_DEBUG,
-         "%s: Peer did not specify bearer capability.  Closing.\n",__FUNCTION__);
-         set_error(c, VENDOR_ERROR, "Specify bearer capability");
-         c->needclose = -1;
-         return -EINVAL;
-         } */
         if ((!strlen (t->hostname)) && ((t->chal_them.state) || ((t->chal_us.state))))
         {
             if (DEBUG)
@@ -582,13 +667,16 @@ int control_finish (struct tunnel *t, struct call *c)
         t->state = SCCCN;
         buf = new_outgoing (t);
         add_message_type_avp (buf, SCCCN);
-        if (t->hbit)
+        if (t->version == VER_L2TPV2)
         {
-            mk_challenge (t->chal_them.vector, VECTOR_SIZE);
-            add_randvect_avp (buf, t->chal_them.vector, VECTOR_SIZE);
+            if (t->hbit)
+            {
+                mk_challenge (t->chal_them.vector, VECTOR_SIZE);
+                add_randvect_avp (buf, t->chal_them.vector, VECTOR_SIZE);
+            }
+            if (t->chal_us.state)
+                add_chalresp_avp (buf, t->chal_us.response, MD_SIG_SIZE);
         }
-        if (t->chal_us.state)
-            add_chalresp_avp (buf, t->chal_us.response, MD_SIG_SIZE);
         add_control_hdr (t, c, buf);
         if (gconfig.packet_dump)
             do_packet_dump (buf);
@@ -596,6 +684,12 @@ int control_finish (struct tunnel *t, struct call *c)
         if (gconfig.debug_state)
             l2tp_log (LOG_DEBUG, "%s: sending SCCCN\n", __FUNCTION__);
         control_xmit (buf);
+
+        if (t->version == VER_L2TPV3)
+        {
+            l2tp_log (LOG_DEBUG, "%s: calling l2tpv3_create_tunnel @ SCCRP ", __FUNCTION__);
+            l2tpv3_create_tunnel (t);
+        }
 
 #ifdef USE_KERNEL
         connect_pppol2tp(t);
@@ -642,6 +736,12 @@ int control_finish (struct tunnel *t, struct call *c)
 		  ntohs (t->peer.sin_port), t->ourtid, t->tid, t->refme, t->refhim,
 		  t->lns->entname);
 
+        if (t->version == VER_L2TPV3)
+        {
+            l2tp_log (LOG_DEBUG, "%s: calling l2tpv3_create_tunnel @ SCCCN ", __FUNCTION__);
+            l2tpv3_create_tunnel (t);
+        }
+
 #ifdef USE_KERNEL
         connect_pppol2tp(t);
 #endif
@@ -679,8 +779,10 @@ int control_finish (struct tunnel *t, struct call *c)
             return -EINVAL;
         }
         /* In case they're disconnecting immediately after SCCN */
-        if (!t->tid)
+        if (!t->tid) {
+            l2tp_log (LOG_DEBUG, "%s: XXX tid change?\n", __FUNCTION__);
             t->tid = t->qtid;
+        }
         if (t->self->result < 0)
         {
             if (DEBUG)
@@ -767,16 +869,25 @@ int control_finish (struct tunnel *t, struct call *c)
         p->state = ICRP;
         buf = new_outgoing (t);
         add_message_type_avp (buf, ICRP);
-        if (t->hbit)
+        if (t->version == VER_L2TPV2)
         {
-            mk_challenge (t->chal_them.vector, VECTOR_SIZE);
-            add_randvect_avp (buf, t->chal_them.vector, VECTOR_SIZE);
-        }
+            if (t->hbit)
+            {
+                mk_challenge (t->chal_them.vector, VECTOR_SIZE);
+                add_randvect_avp (buf, t->chal_them.vector, VECTOR_SIZE);
+            }
 #ifdef TEST_HIDDEN
-        add_callid_avp (buf, p->ourcid, t);
+            add_callid_avp (buf, p->ourcid, t);
 #else
-        add_callid_avp (buf, p->ourcid);
+            add_callid_avp (buf, p->ourcid);
 #endif
+        }
+        if (t->version == VER_L2TPV3)
+        {
+            add_local_session_id_avp (buf, p->ourcid);
+            add_remote_session_id_avp (buf, p->cid);
+            add_circuit_status_avp (buf);
+        }
 /*		if (p->ourrws >=0)
 			add_avp_rws(buf, p->ourrws); */
         /*
@@ -810,19 +921,30 @@ int control_finish (struct tunnel *t, struct call *c)
 
         buf = new_outgoing (t);
         add_message_type_avp (buf, ICCN);
-        if (t->hbit)
+        if (t->version == VER_L2TPV2)
         {
-            mk_challenge (t->chal_them.vector, VECTOR_SIZE);
-            add_randvect_avp (buf, t->chal_them.vector, VECTOR_SIZE);
+            if (t->hbit)
+            {
+                mk_challenge (t->chal_them.vector, VECTOR_SIZE);
+                add_randvect_avp (buf, t->chal_them.vector, VECTOR_SIZE);
+            }
+            add_txspeed_avp (buf, t->txspeed);
+            add_frame_avp (buf, c->frame);
         }
-        add_txspeed_avp (buf, t->txspeed);
-        add_frame_avp (buf, c->frame);
+        if (t->version == VER_L2TPV3)
+        {
+            add_local_session_id_avp (buf, c->ourcid);
+            add_remote_session_id_avp (buf, c->cid);
+        }
 /*		if (c->ourrws >= 0)
 			add_avp_rws(buf, c->ourrws); */
         /* FIXME: Packet Processing Delay */
         /* We don't need any kind of proxy PPP stuff */
         /* Can we proxy authenticate ourselves??? */
-        add_rxspeed_avp (buf, t->rxspeed);
+        if (t->version == VER_L2TPV2)
+        {
+            add_rxspeed_avp (buf, t->rxspeed);
+        }
 /* add_seqreqd_avp (buf); *//* We don't have sequencing code, so
  * don't ask for sequencing */
         add_control_hdr (t, c, buf);
@@ -915,7 +1037,15 @@ int control_finish (struct tunnel *t, struct call *c)
             po = add_opt (po, "ipparam");
             po = add_opt (po, IPADDY (t->peer.sin_addr));
         }
-        start_pppd (c, po);
+        if (t->version == VER_L2TPV2)
+        {
+            start_pppd (c, po);
+        }
+        if (t->version == VER_L2TPV3)
+        {
+            l2tp_log (LOG_DEBUG, "%s: calling l2tpv3_create_session @ ICRP ", __FUNCTION__);
+            l2tpv3_create_session (c);
+        }
         opt_destroy (po);
         if (c->lac)
             c->lac->rtries = 0;
@@ -994,8 +1124,15 @@ int control_finish (struct tunnel *t, struct call *c)
             po = add_opt (po, "ipparam");
             po = add_opt (po, IPADDY (t->peer.sin_addr));
         }
-
-        start_pppd (c, po);
+        if (t->version == VER_L2TPV2)
+        {
+            start_pppd (c, po);
+        }
+        if (t->version == VER_L2TPV3)
+        {
+            l2tp_log (LOG_DEBUG, "%s: calling l2tpv3_create_session @ ICCN ", __FUNCTION__);
+            l2tpv3_create_session (c);
+        }
         opt_destroy (po);
         l2tp_log (LOG_NOTICE,
              "Call established with %s, Local: %d, Remote: %d, Serial: %d\n",
@@ -1248,7 +1385,7 @@ inline int check_control (const struct buffer *buf, struct tunnel *t,
             }
             return -EINVAL;
         }
-        if (CVER (h->ver) != VER_L2TP)
+        if ((CVER (h->ver) != VER_L2TPV2) && (CVER (h->ver) != VER_L2TPV3))
         {
             if (DEBUG)
             {
@@ -1257,7 +1394,7 @@ inline int check_control (const struct buffer *buf, struct tunnel *t,
                     l2tp_log (LOG_DEBUG,
                          "%s: PPTP packet received\n", __FUNCTION__);
                 }
-                else if (CVER (h->ver) < VER_L2TP)
+                else if (CVER (h->ver) < VER_L2TPV2)
                 {
                     l2tp_log (LOG_DEBUG,
                          "%s: L2F packet received\n", __FUNCTION__);
@@ -1270,7 +1407,15 @@ inline int check_control (const struct buffer *buf, struct tunnel *t,
             }
             return -EINVAL;
         }
-
+    }
+    if (!t->version)
+    {
+        l2tp_log (LOG_DEBUG, "%s: t->version = %d CVER (h->ver) = %d\n", __FUNCTION__, t->version, CVER (h->ver));
+        t->version = CVER (h->ver);
+    }
+    else
+    {
+        l2tp_log (LOG_DEBUG, "%s: t->version = %d\n", __FUNCTION__, t->version);
     }
 #endif
     return 0;
@@ -1338,7 +1483,7 @@ inline int check_payload (struct buffer *buf, struct tunnel *t,
             ehlen += 2;         /* Offset information */
         if (PLBIT (h->ver))
             ehlen += h->length; /* include length if available */
-        if (PVER (h->ver) != VER_L2TP)
+        if ((PVER (h->ver) != VER_L2TPV2) && (CVER (h->ver) != VER_L2TPV3))
         {
             if (DEBUG)
             {
@@ -1347,7 +1492,7 @@ inline int check_payload (struct buffer *buf, struct tunnel *t,
                     l2tp_log (LOG_DEBUG, "%s: PPTP packet received\n",
                          __FUNCTION__);
                 }
-                else if (CVER (h->ver) < VER_L2TP)
+                else if (CVER (h->ver) < VER_L2TPV2)
                 {
                     l2tp_log (LOG_DEBUG, "%s: L2F packet received\n",
                          __FUNCTION__);
@@ -1698,7 +1843,7 @@ inline int write_packet (struct buffer *buf, struct tunnel *t, struct call *c,
     return 0;
 }
 
-void handle_special (struct buffer *buf, struct call *c, _u16 call)
+void handle_special (struct buffer *buf, struct call *c, _u16 call) /* XXX */
 {
     /*
        * This procedure is called when we have received a packet

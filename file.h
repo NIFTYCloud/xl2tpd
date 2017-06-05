@@ -98,6 +98,9 @@ struct lns
     int pass_peer;              /* Pass peer IP to pppd as ipparam? */
     char pppoptfile[STRLEN];    /* File containing PPP options */
     struct tunnel *t;           /* Tunnel of this, if it's ready */
+    int version;                /* L2TP version */
+    char script[STRLEN];        /* Up/Down script */
+    char ifname[STRLEN];        /* Interface name */
 };
 
 struct lac
@@ -138,6 +141,9 @@ struct lac
     int debug;
     struct tunnel *t;           /* Our tunnel */
     struct call *c;             /* Our call */
+    int version;                /* L2TP version */
+    char script[STRLEN];        /* Up/Down script */
+    char ifname[STRLEN];        /* Interface name */
 };
 
 struct global
@@ -162,6 +168,7 @@ struct global
     int sarefnum;		/* Value of IPSEC_REFINFO used by kernel
 				 * (we used to pick 22, but 2.6.36+ took that, so now we pick 30)
 				 * Changed in SAref patch in openswan 2.6.36 for linux 2.6.36+ */
+    unsigned int router_id;              /* Router ID */
 };
 
 extern struct global gconfig;   /* Global configuration options */

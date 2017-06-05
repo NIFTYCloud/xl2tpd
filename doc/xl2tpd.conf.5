@@ -76,6 +76,10 @@ Set this to yes to enable syslog output of FSM debugging information.
 .B debug tunnel
 Set this to yes to enable syslog output of tunnel debugging information.
 
+.TP
+.B router id
+Set router id for L2TPv3.
+
 .SH "LNS SECTION"
 .TP 
 .B exclusive
@@ -191,6 +195,18 @@ If set, the receive bandwidth maximum will be set to this value
 .B tx bps
 If set, the transmit bandwidth maximum will be set to this value
 
+.TP
+.B version
+Set 2 or 3 for L2TP version.
+
+.TP
+.B script
+Set path for script to execute when L2TPv3 interface up/down.
+
+.TP
+.B ifname
+Set interface name for L2TPv3 interface to create.
+
 .SH "LAC SECTION"
 The following are LAC specific configuration flags. Most of those
 described in the LNS section may be used in a LAC context, where
@@ -215,6 +231,18 @@ to use this option.  Defaults to 30 seconds.
 .TP 
 .B max redials 
 Will give up redial tries after X attempts.
+
+.TP
+.B version
+Set 2 or 3 for L2TP version.
+
+.TP
+.B script
+Set path for script to execute when L2TPv3 interface up/down.
+
+.TP
+.B ifname
+Set interface name for L2TPv3 interface to create.
 
 .SH "FILES"
 

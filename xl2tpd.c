@@ -311,7 +311,10 @@ void death_handler (int signal)
        * Then we close the connections
      */
     struct tunnel *st, *st2;
+    struct call *sc;
     int sec;
+    struct buffer *buf;
+    char *errmsg = "Terminated";
     l2tp_log (LOG_CRIT, "%s: Fatal signal %d received\n", __FUNCTION__, signal);
 #ifdef USE_KERNEL
         if (kernel_support || signal != SIGTERM) {
@@ -335,6 +338,33 @@ void death_handler (int signal)
                         st = st2;
                 }
         }
+
+    st = tunnels.head;
+    while (st)
+    {
+        if (st->version != VER_L2TPV3)
+        {
+            l2tp_log (LOG_CRIT, "%s: version != VER_L2TPV2 %lld\n", __FUNCTION__, st->ourtid);
+            st = st->next;
+            continue;
+        }
+        sc = st->call_head;
+        while (sc)
+        {
+            l2tp_log (LOG_CRIT, "%s: l2tpv3_delete_session %lld\n", __FUNCTION__, sc->ourcid);
+            l2tpv3_delete_session (sc);
+            sc = sc->next;
+        }
+        l2tp_log (LOG_CRIT, "%s: l2tpv3_delete_tunnel %lld\n", __FUNCTION__, st->ourtid);
+        l2tpv3_delete_tunnel (st);
+        buf = new_outgoing (st);
+        add_message_type_avp (buf, StopCCN);
+        add_result_code_avp (buf, 1, 1, errmsg, strlen (errmsg));
+        add_tunnelid_avp (buf, st->ourtid);
+        add_control_hdr (st, st->self, buf);
+        control_xmit (buf);
+        st = st->next;
+    }
 
     /* erase pid and control files */
     unlink (gconfig.pidfile);
@@ -460,11 +490,11 @@ int start_pppd (struct call *c, struct ppp_opts *opts)
         stropt[pos++] = strdup ("pppol2tp_lns_mode");
         stropt[pos++] = strdup ("pppol2tp_tunnel_id");
         stropt[pos] = (char *) malloc (10);
-        snprintf (stropt[pos], 10, "%d", c->container->ourtid);
+        snprintf (stropt[pos], 10, "%lld", c->container->ourtid);
             pos++;
         stropt[pos++] = strdup ("pppol2tp_session_id");
         stropt[pos] = (char *) malloc (10);
-        snprintf (stropt[pos], 10, "%d", c->ourcid);
+        snprintf (stropt[pos], 10, "%lld", c->ourcid);
             pos++;
        }
         stropt[pos] = NULL;
@@ -673,6 +703,13 @@ void destroy_tunnel (struct tunnel *t)
         free (t->chal_them.vector);
     if (t->pppox_fd > -1 )
         close (t->pppox_fd);
+
+    if (t->version == VER_L2TPV3) 
+    {
+        l2tp_log (LOG_DEBUG, "%s: calling l2tpv3_delete_tunnel", __FUNCTION__);
+        l2tpv3_delete_tunnel (t);
+    }
+
     if (t->udp_fd > -1 )
         close (t->udp_fd);
     free (t);
@@ -717,10 +754,14 @@ struct tunnel *l2tp_call (char *host, int port, struct lac *lac,
     tmp->container->lns = lns;
     tmp->lac = lac;
     tmp->lns = lns;
-    if (lac)
+    if (lac) {
         lac->t = tmp->container;
-    if (lns)
+        tmp->container->version = lac->version;
+    }
+    if (lns) {
         lns->t = tmp->container;
+        tmp->container->version = lns->version;
+    }
     /*
      * Since our state is 0, we will establish a tunnel now
      */
@@ -826,7 +867,7 @@ void magic_lac_dial (void *data)
     lac_call (lac->t->ourtid, lac, NULL);
 }
 
-void lac_hangup (int cid)
+void lac_hangup (long long int cid)
 {
     struct tunnel *t = tunnels.head;
     struct call *tmp;
@@ -853,7 +894,7 @@ void lac_hangup (int cid)
     return;
 }
 
-void lac_disconnect (int tid)
+void lac_disconnect (long long int tid)
 {
     struct tunnel *t = tunnels.head;
     while (t)
@@ -1787,6 +1828,8 @@ void init (int argc,char *argv[])
     init_tunnel_list (&tunnels);
     if (init_network ())
         exit (1);
+
+    init_l2tpv3();
 
     if (gconfig.daemon)
         daemonize ();

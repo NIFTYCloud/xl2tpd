@@ -11,6 +11,7 @@
 #ifndef _COMMON_H_
 typedef unsigned char _u8;
 typedef unsigned short _u16;
+typedef unsigned int _u32;
 typedef unsigned long long _u64;
 extern int rand_source;
 

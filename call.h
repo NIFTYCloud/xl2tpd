@@ -44,9 +44,9 @@ struct call
     int msgtype;                /* What kind of message are we
                                    working with right now? */
 
-    int ourcid;                 /* Our call number */
-    int cid;                    /* Their call number */
-    int qcid;                   /* Quitting CID */
+    long long int ourcid;       /* Our call number */
+    long long int cid;          /* Their call number */
+    long long int qcid;         /* Quitting CID */
     int bearer;                 /* Bearer type of call */
     unsigned int serno;         /* Call serial number */
     unsigned int addr;          /* Address reserved for this call */
@@ -97,10 +97,10 @@ struct call
 
 extern void push_handler (int);
 extern void toss (struct buffer *);
-extern struct call *get_call (int tunnel, int call, struct in_addr addr,
+extern struct call *get_call (long long int tunnel, long long int call, struct in_addr addr,
 			      int port,
 			      IPsecSAref_t refme, IPsecSAref_t refhim);
-extern struct call *get_tunnel (int, unsigned int, int);
+extern struct call *get_tunnel (long long int, unsigned int, int);
 extern void destroy_call (struct call *);
 extern struct call *new_call (struct tunnel *);
 extern void set_error (struct call *, int, const char *, ...);

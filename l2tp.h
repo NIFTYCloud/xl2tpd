@@ -14,6 +14,7 @@
  */
 /*
 typedef unsigned short _u16;
+typedef unsigned long _u32;
 typedef unsigned long long _u64;
  */
 #ifndef _L2TP_H
@@ -36,6 +37,7 @@ typedef unsigned long long _u64;
 #include "aaa.h"
 #include "common.h"
 #include "ipsecmast.h"
+#include "l2tpv3.h"
 
 #define CONTROL_PIPE "/var/run/xl2tpd/l2tp-control"
 #define CONTROL_PIPE_MESSAGE_SIZE 1024
@@ -76,6 +78,16 @@ struct control_hdr
     _u16 Nr;                    /* Next received */
 } __attribute__((packed));
 
+struct controlv3_hdr
+{
+    _u16 ver;
+    _u16 length;
+    _u32 tid;
+    _u16 Ns;
+    _u16 Nr;
+} __attribute__((packed));
+
+
 #define CTBIT(ver) (ver & 0x8000)       /* Determins if control or not */
 #define CLBIT(ver) (ver & 0x4000)       /* Length bit present.  Must be 1
                                            for control messages */
@@ -99,6 +111,15 @@ struct payload_hdr
     _u16 Nr;                    /* Optional next received */
     _u16 o_size;                /* Optional offset size */
 //    _u16 o_pad;                 /* Optional offset padding */
+} __attribute__((packed));
+
+struct payloadv3_hdr
+{
+    _u16 ver;
+    _u16 length;
+    _u32 tid;
+    _u16 Ns;
+    _u16 Nr;
 } __attribute__((packed));
 
 #define NZL_TIMEOUT_DIVISOR 4   /* Divide TIMEOUT by this and
@@ -151,11 +172,11 @@ struct tunnel
     int ourbc;                  /* Our bearer channels */
     _u64 tb;                    /* Their tie breaker */
     _u64 ourtb;                 /* Our tie breaker */
-    int tid;                    /* Peer's tunnel identifier */
+    long long int tid;          /* Peer's tunnel identifier */
     IPsecSAref_t refme;         /* IPsec SA particulars */
     IPsecSAref_t refhim;
-    int ourtid;                 /* Our tunnel identifier */
-    int qtid;                   /* TID for disconnection */
+    long long int ourtid;       /* Our tunnel identifier */
+    long long int qtid;         /* TID for disconnection */
     int firmware;               /* Peer's firmware revision */
 #if 0
     unsigned int addr;          /* Remote address */
@@ -188,6 +209,9 @@ struct tunnel
     struct lns *lns;            /* LNS that owns us */
     struct lac *lac;            /* LAC that owns us */
     struct in_pktinfo my_addr;  /* Address of my endpoint */
+    int version;                /* L2TP version */
+    char remote_end_id[MAXSTRLEN]; /* Remote End ID */
+    _u32 router_id;             /* Remote Router ID */
 };
 
 struct tunnel_list
@@ -198,7 +222,8 @@ struct tunnel_list
 };
 
 /* Values for version */
-#define VER_L2TP 2
+#define VER_L2TPV2 2
+#define VER_L2TPV3 3
 #define VER_PPTP 3
 
 /* Some PPP sync<->async stuff */
